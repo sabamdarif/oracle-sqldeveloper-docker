@@ -1,0 +1,54 @@
+services:
+  oracle-xe:
+    image: gvenzl/oracle-xe:latest
+    pull_policy: always
+    container_name: oracle-xe
+    restart: unless-stopped
+
+    environment:
+      ORACLE_PASSWORD: "${ORACLE_PASSWORD:-9732}"
+
+    ports:
+      - "1521:1521"
+
+    volumes:
+      - oracle-xe-data:/opt/oracle/oradata
+
+    healthcheck:
+      test: ["CMD", "healthcheck.sh"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 60s
+
+  sqldeveloper:
+    image: oracle-sqldeveloper:latest
+    container_name: oracle-sqldeveloper
+
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        HOST_UID: "${HOST_UID:-1000}"
+        HOST_GID: "${HOST_GID:-1000}"
+        SQLDEVELOPER_URL: "${SQLDEVELOPER_URL:-https://download.oracle.com/otn_software/java/sqldeveloper/sqldeveloper-26.2.0.186.2220-x64.zip}"
+
+    depends_on:
+      oracle-xe:
+        condition: service_healthy
+
+    environment:
+      DISPLAY: "${DISPLAY}"
+      _JAVA_AWT_WM_NONREPARENTING: "1"
+      _JAVA_OPTIONS: "-Dsun.java2d.pmoffscreen=false"
+
+    volumes:
+      - /tmp/.X11-unix:/tmp/.X11-unix:rw
+      - "${HOME}/.local/share/oracle-sqldeveloper/sqldeveloper:/home/sqldev/.sqldeveloper"
+      - "${HOME}/.local/share/oracle-sqldeveloper/java:/home/sqldev/.java"
+
+    stdin_open: true
+    tty: true
+
+volumes:
+  oracle-xe-data:
