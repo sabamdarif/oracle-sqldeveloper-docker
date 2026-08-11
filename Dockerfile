@@ -64,10 +64,11 @@ RUN JAVA_PATH="$(readlink -f "$(command -v javac)")" \
     && ln -s "${SYSTEM_JAVA_HOME}" /opt/java \
     && rm -rf /opt/sqldeveloper/jdk \
     && ln -s /opt/java /opt/sqldeveloper/jdk \
-    && echo "/opt/java/lib/jli" > /etc/ld.so.conf.d/java.conf \
-    && echo "/opt/java/lib/server" >> /etc/ld.so.conf.d/java.conf \
-    && echo "/opt/java/lib" >> /etc/ld.so.conf.d/java.conf \
-    && ldconfig
+    && echo "${SYSTEM_JAVA_HOME}/lib/jli" > /etc/ld.so.conf.d/java.conf \
+    && echo "${SYSTEM_JAVA_HOME}/lib/server" >> /etc/ld.so.conf.d/java.conf \
+    && echo "${SYSTEM_JAVA_HOME}/lib" >> /etc/ld.so.conf.d/java.conf \
+    && ldconfig \
+    && ln -sf "${SYSTEM_JAVA_HOME}/lib/jli/libjli.so" /usr/lib/libjli.so
 
 # Workaround required by the SQL Developer launcher on some Linux systems.
 RUN LAUNCHER=/opt/sqldeveloper/ide/bin/launcher.sh \
