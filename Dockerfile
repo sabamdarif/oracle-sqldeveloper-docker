@@ -11,6 +11,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     bash \
     ca-certificates \
     curl \
+    file \
     fontconfig \
     gnupg \
     ksh \
@@ -62,7 +63,11 @@ RUN JAVA_PATH="$(readlink -f "$(command -v javac)")" \
     && SYSTEM_JAVA_HOME="$(dirname "$(dirname "${JAVA_PATH}")")" \
     && ln -s "${SYSTEM_JAVA_HOME}" /opt/java \
     && rm -rf /opt/sqldeveloper/jdk \
-    && ln -s /opt/java /opt/sqldeveloper/jdk
+    && ln -s /opt/java /opt/sqldeveloper/jdk \
+    && echo "/opt/java/lib/jli" > /etc/ld.so.conf.d/java.conf \
+    && echo "/opt/java/lib/server" >> /etc/ld.so.conf.d/java.conf \
+    && echo "/opt/java/lib" >> /etc/ld.so.conf.d/java.conf \
+    && ldconfig
 
 # Workaround required by the SQL Developer launcher on some Linux systems.
 RUN LAUNCHER=/opt/sqldeveloper/ide/bin/launcher.sh \
@@ -79,6 +84,7 @@ RUN chown -R sqldev:sqldev /home/sqldev \
 ENV HOME=/home/sqldev
 ENV JAVA_HOME=/opt/java
 ENV PATH="/opt/java/bin:${PATH}"
+ENV LD_LIBRARY_PATH="/opt/java/lib/jli:/opt/java/lib/server:/opt/java/lib:${LD_LIBRARY_PATH}"
 ENV _JAVA_AWT_WM_NONREPARENTING=1
 ENV _JAVA_OPTIONS="-Dsun.java2d.pmoffscreen=false"
 
