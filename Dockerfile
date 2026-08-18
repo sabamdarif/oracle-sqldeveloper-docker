@@ -1,92 +1,54 @@
-FROM fedora:40
+# Oracle XE 21c + SQL Developer in one image.
+#
+# The base image is what oci-oracle-xe/ builds: Oracle XE on Oracle Linux 8
+# with the database already created at build time, so a container starts in
+# seconds instead of running `oracle-xe-21c configure` for 20 minutes.
+#
+#   docker build -t sqldev-xe .
+#   xhost +local:
+#   docker run --rm -it --init --shm-size=1g -p 1521:1521 \
+#       -e DISPLAY -v /tmp/.X11-unix:/tmp/.X11-unix sqldev-xe
+#
+# Connect inside SQL Developer with SYSTEM / password on localhost:1521,
+# service XEPDB1 (or XE for the CDB). Needs >=2 GB of container memory.
+FROM gvenzl/oracle-xe:21-slim-faststart
+
 ARG HOST_UID=1000
 ARG HOST_GID=1000
 # This ARG is replaced by build-latest.sh when a newer version is found.
 ARG SQLDEVELOPER_URL="https://download.oracle.com/otn_software/java/sqldeveloper/sqldeveloper-26.2.0.186.2220-x64.zip"
-# Oracle XE 21c RPM download URL.  The CDN URL below often works without
-# authentication.  If it fails, download the RPM from
-#   https://www.oracle.com/database/technologies/xe-downloads.html
-# place it in this directory, and pass the filename via:
-#   --build-arg ORACLE_DB_RPM_URL=oracle-database-xe-21c-1.0-1.ol8.x86_64.rpm
-# (curl treats a plain filename as a local path relative to /, so for local
-# files use COPY instead — see the COPY fallback comment below).
-ARG ORACLE_DB_RPM_URL="https://download.oracle.com/otn-pub/otn_software/db-express/oracle-database-xe-21c-1.0-1.ol8.x86_64.rpm"
+
+USER root
 
 # -----------------------------------------------------------------
-# 1. Core system packages + GUI libraries (Fedora equivalents of the
-#    Debian packages from the original image, plus Oracle DB prereqs)
+# 1. GUI libraries and fonts (the base image is headless).
+#    gtk3 pulls in the rest of the X client libraries; libXtst and
+#    mesa-libGL are what the JDK needs on top of it.
 # -----------------------------------------------------------------
-RUN dnf update -y && dnf install -y \
+RUN microdnf -y install \
     alsa-lib \
-    bc \
-    ca-certificates \
-    curl \
-    file \
+    dejavu-sans-fonts \
     fontconfig \
-    freetype \
     gtk3 \
-    initscripts \
-    ksh \
-    libaio \
-    libnsl \
-    libX11 \
-    libXcomposite \
-    libXcursor \
-    libXdamage \
-    libXext \
-    libXfixes \
-    libXi \
-    libXinerama \
-    libXrandr \
-    libXrender \
     libXtst \
-    lsof \
     mesa-libGL \
-    net-tools \
-    numactl \
-    procps-ng \
-    sysstat \
+    shadow-utils \
+    sudo \
     unzip \
-    && dnf clean all
+    && microdnf clean all
 
 # -----------------------------------------------------------------
-# 2. Oracle Database XE 21c — preinstall RPM
-#    Creates the oracle user/groups and configures security limits.
-#    The sysctl kernel-parameter changes it attempts are silently
-#    skipped in Docker (expected; pass --privileged at runtime if
-#    you need them, or set them on the host before starting the
-#    container).
-# -----------------------------------------------------------------
-RUN curl -fsSL \
-    "https://yum.oracle.com/repo/OracleLinux/OL8/appstream/x86_64/getPackage/oracle-database-preinstall-21c-1.0-1.el8.x86_64.rpm" \
-    -o /tmp/oracle-preinstall.rpm \
-    && rpm -ivh --nodeps /tmp/oracle-preinstall.rpm \
-    && rm /tmp/oracle-preinstall.rpm
-
-# -----------------------------------------------------------------
-# 3. Oracle Database XE 21c — software install
-#    The database is NOT configured here; run
-#      /etc/init.d/oracle-xe-21c configure
-#    on first container start to create the XE / XEPDB1 instances.
-# -----------------------------------------------------------------
-RUN curl -fL --retry 5 --retry-delay 3 "${ORACLE_DB_RPM_URL}" \
-    -o /tmp/oracle-xe.rpm \
-    && dnf install -y /tmp/oracle-xe.rpm \
-    && rm /tmp/oracle-xe.rpm
-
-# -----------------------------------------------------------------
-# 4. BellSoft Liberica JDK 17 Full (includes LibericaFX / JavaFX,
+# 2. BellSoft Liberica JDK 17 Full (includes LibericaFX / JavaFX,
 #    required by SQL Developer)
 # -----------------------------------------------------------------
 RUN rpm --import https://download.bell-sw.com/pki/GPG-KEY-bellsoft \
-    && printf '[BellSoft]\nname=BellSoft Repository\nbaseurl=https://yum.bell-sw.com\nenabled=1\ngpgcheck=1\ngpgkey=https://download.bell-sw.com/pki/GPG-KEY-bellsoft\npriority=1\n' \
+    && printf '[BellSoft]\nname=BellSoft Repository\nbaseurl=https://yum.bell-sw.com\nenabled=1\ngpgcheck=1\ngpgkey=https://download.bell-sw.com/pki/GPG-KEY-bellsoft\n' \
     > /etc/yum.repos.d/bellsoft.repo \
-    && dnf install -y bellsoft-java17-full \
-    && dnf clean all
+    && microdnf -y install bellsoft-java17-full \
+    && microdnf clean all
 
 # -----------------------------------------------------------------
-# 5. Re-point java to BellSoft's full JDK
-#    BellSoft Full includes JavaFX, required by SQL Developer.
+# 3. Re-point java to BellSoft's full JDK
 # -----------------------------------------------------------------
 RUN JAVA_HOME=$(readlink -f /usr/lib/jvm/bellsoft-java17-full*) \
     && ln -sf "${JAVA_HOME}/bin/java" /usr/bin/java \
@@ -96,13 +58,20 @@ RUN JAVA_HOME=$(readlink -f /usr/lib/jvm/bellsoft-java17-full*) \
     && ln -sf "${JAVA_HOME}/lib/libjli.so" /usr/lib/libjli.so \
     && java -version
 
+# -----------------------------------------------------------------
+# 4. GUI user, matched to the host UID so the X11 socket and any
+#    mounted directories stay usable. It may become `oracle` (and
+#    only `oracle`) to start and check the database.
+# -----------------------------------------------------------------
 RUN groupadd --gid "${HOST_GID}" sqldev \
     && useradd \
     --uid "${HOST_UID}" \
     --gid "${HOST_GID}" \
     --create-home \
     --shell /bin/bash \
-    sqldev
+    sqldev \
+    && echo 'sqldev ALL=(oracle) NOPASSWD: ALL' > /etc/sudoers.d/sqldev-oracle \
+    && chmod 440 /etc/sudoers.d/sqldev-oracle
 
 WORKDIR /opt
 RUN echo "Downloading: ${SQLDEVELOPER_URL}" \
@@ -133,11 +102,17 @@ RUN chown -R sqldev:sqldev /home/sqldev \
 ENV HOME=/home/sqldev
 ENV JAVA_HOME=/opt/java
 ENV PATH="/opt/java/bin:${PATH}"
-ENV LD_LIBRARY_PATH="/opt/java/lib:/opt/java/lib/server:${LD_LIBRARY_PATH}"
+ENV LD_LIBRARY_PATH="/opt/java/lib:/opt/java/lib/server"
 ENV _JAVA_AWT_WM_NONREPARENTING=1
 ENV _JAVA_OPTIONS="-Dsun.java2d.pmoffscreen=false"
-ENV ORACLE_BASE=/opt/oracle
-ENV ORACLE_SID=XE
+# SYS and SYSTEM password, set on the first container start. Override with -e.
+ENV ORACLE_PASSWORD=password
+
+EXPOSE 1521
+
+# The inherited healthcheck authenticates to the database as the OS user, so it
+# has to run as `oracle` now that the container runs as `sqldev`.
+HEALTHCHECK CMD sudo -iu oracle healthcheck.sh >/dev/null || exit 1
 
 USER sqldev
 WORKDIR /opt/sqldeveloper
