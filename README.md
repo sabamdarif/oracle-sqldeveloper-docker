@@ -44,7 +44,11 @@ chroot-distro run --shared-display oracle-sqldeveloper
 ```
 
 `--shared-display` wires up X11/Wayland, audio and D-Bus. Quitting SQL Developer
-ends the run. Arguments after `--` are passed on to
+ends the run. Arguments after `--` are passed on to SQL Developer.
+
+Only one Oracle can own port 1521 and the guest shares the host's network, so stop a
+Docker or host database first; the entrypoint says so instead of failing halfway. A
+listener this container left behind on an earlier run is cleared automatically.
 
 ## Connecting
 

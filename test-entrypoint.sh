@@ -11,8 +11,10 @@ run() {
     local stub status="$1" existing="${2:-fresh}"
     stub=$(mktemp -d)
 
-    # One stub serves both `sudo -iu oracle env ... container-entrypoint.sh` and
-    # `sudo -iu oracle resetPassword ...`, naming whichever it was asked for.
+    # One stub serves the four things the entrypoint asks sudo for, naming
+    # whichever it was: `container-entrypoint.sh`, `resetPassword`, the
+    # `healthcheck.sh` that decides whether a database is already reachable, and
+    # the `lsnrctl stop` that clears a leftover listener.
     cat >"${stub}/sudo" <<'STUB'
 #!/bin/sh
 for arg in "$@"; do
@@ -24,6 +26,13 @@ for arg in "$@"; do
     resetPassword)
         echo reset
         exit 0
+        ;;
+    healthcheck.sh)
+        exit "${STUB_HEALTHY:-1}"
+        ;;
+    lsnrctl)
+        echo "${STUB_LSNRCTL_OUT:-TNS-12541: TNS:no listener}"
+        exit "${STUB_LSNRCTL_STATUS:-1}"
         ;;
     esac
 done
@@ -38,11 +47,15 @@ STUB
         cd "${stub}" || exit 1
         PATH="${stub}:${PATH}" \
             STUB_DB_STATUS="${status}" \
+            STUB_HEALTHY="${STUB_HEALTHY:-1}" \
+            STUB_LSNRCTL_OUT="${STUB_LSNRCTL_OUT:-}" \
+            STUB_LSNRCTL_STATUS="${STUB_LSNRCTL_STATUS:-1}" \
             ORACLE_BASE="${stub}/oracle" \
             ORACLE_SID="XE" \
             ORACLE_PASSWORD="secret" \
             bash "${here}/docker-entrypoint.sh" 2>/dev/null
     )
+    printf 'status=%s\n' "$?"
     rm -rf "${stub}"
 }
 # The steps the stubs reported, in order, so a test can assert on the sequence.
@@ -61,5 +74,19 @@ fail() {
 
 [ "$(steps "$(run 0 existing)")" = "db reset gui " ] ||
     fail "an existing database must have the configured password re-applied"
+
+foreign=$(STUB_LSNRCTL_OUT='TNS-01189: The listener could not authenticate the user' run 0)
+[ "$(steps "${foreign}")" = "" ] ||
+    fail "a listener on port 1521 that is not ours must stop the start before the database"
+[ "${foreign#*status=}" != 0 ] ||
+    fail "a listener on port 1521 that is not ours must fail, not skip silently"
+
+[ "$(steps "$(STUB_LSNRCTL_STATUS=0 run 0)")" = "db gui " ] ||
+    fail "a listener a previous run left behind must be stopped, then the database started"
+
+# TNS-01189 would abort the start if the listener were touched at all, so reaching
+# the GUI is what proves a reachable database was left alone.
+[ "$(steps "$(STUB_HEALTHY=0 STUB_LSNRCTL_OUT='TNS-01189: no' run 0)")" = "db gui " ] ||
+    fail "a database that is already reachable must keep the listener it is registered with"
 
 echo ok

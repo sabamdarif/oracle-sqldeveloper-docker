@@ -15,6 +15,39 @@ DBCONFIG="${ORACLE_BASE}/oradata/dbconfig/${ORACLE_SID}"
 # libraries.
 as_oracle() { sudo -iu oracle "$@"; }
 
+# This entrypoint runs no supervisor, so a previous run leaves its listener behind
+# while its database dies with the session, and container-entrypoint.sh chains
+# `lsnrctl start && startup`: the leftover makes the next start skip the database and
+# report a bare "DATABASE STARTUP FAILED". Clearing it is safe only when this session
+# has no database of its own to lose, which is what healthcheck.sh answers, and a
+# listener that is not this container's refuses the request instead of stopping.
+if ! as_oracle healthcheck.sh "${ORACLE_SID}" >/dev/null 2>&1; then
+    if ! stop_output=$(as_oracle lsnrctl stop 2>&1); then
+        # TNS-01189 is a listener refusing our request: it answered on the TCP
+        # endpoint and is not this container's, so it cannot be cleared from here.
+        # The IPC endpoint reports TNS-12541 in both cases, which is why the
+        # authentication failure is what gets matched and not the absence of one.
+        if [[ "${stop_output}" == *TNS-01189* ]]; then
+            printf '%s\n' "${stop_output}" >&2
+            cat >&2 <<'EOF'
+
+##############################################
+CANNOT START: PORT 1521 IS ALREADY IN USE!
+##############################################
+A listener this container cannot control already answers on port 1521: a Docker
+container, an Oracle installed on the host, or another chroot-distro container.
+Stop it, or leave it running and start the GUI alone against its database:
+
+  chroot-distro run --shared-display --entrypoint ./sqldeveloper.sh NAME
+
+EOF
+            exit 1
+        fi
+    else
+        echo "CONTAINER: stopped the listener a previous run left behind."
+    fi
+fi
+
 # container-entrypoint.sh only honours $ORACLE_PASSWORD on a database it
 # initializes itself, so record which case this is before starting.
 database_existed=false
