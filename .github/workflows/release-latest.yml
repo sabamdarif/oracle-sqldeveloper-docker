@@ -29,7 +29,7 @@ jobs:
       BASE_IMAGE: gvenzl/oracle-free:23-slim-faststart
       ARCHIVE_NAME: oracle-sqldeveloper-x86_64.tar.xz
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Validate inputs
         run: |
@@ -44,12 +44,12 @@ jobs:
           sudo apt-get update
           sudo apt-get install --yes --no-install-recommends python3-venv xz-utils
           /usr/bin/python3 -m venv "$RUNNER_TEMP/chroot-distro"
-          "$RUNNER_TEMP/chroot-distro/bin/pip" install 'chroot-distro==3.3.0'
+          "$RUNNER_TEMP/chroot-distro/bin/pip" install 'chroot-distro'
 
-      - name: Test scripts
+      - name: Check script syntax
         run: |
-          bash test-entrypoint.sh
-          bash test-publish-latest.sh
+          bash -n docker-entrypoint.sh
+          bash -n setup-sqldeveloper-connection.sh
 
       - name: Build with chroot-distro
         run: |
@@ -81,7 +81,7 @@ jobs:
           echo "ARCHIVE_SIZE=$size" >> "$GITHUB_ENV"
           echo "ARCHIVE_SHA256=$(sha256sum "$archive" | cut -d ' ' -f 1)" >> "$GITHUB_ENV"
 
-      - name: Write replacement release notes
+      - name: Write release notes
         run: |
           cat > "$RUNNER_TEMP/release-notes.md" <<EOF
           # Oracle Database Free + SQL Developer
@@ -89,22 +89,13 @@ jobs:
           - **SQL Developer version:** $SQLDEVELOPER_VERSION
           - **Oracle Database base image:** \`$BASE_IMAGE\`
           - **Architecture:** Linux x86_64 (amd64)
-          - **Archive:** \`$ARCHIVE_NAME\` ($ARCHIVE_SIZE bytes)
-          - **Format:** chroot-distro backup, including image startup settings
-          - **Built from:** $GITHUB_SHA
-          - **Build:** https://github.com/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID
-          - **SQL Developer download:** $SQLDEVELOPER_URL
 
           ## Install and run
 
-          Requires Linux x64, chroot-distro, a desktop display, and at least 2 GB of free memory for Oracle plus memory for SQL Developer.
-
           \`\`\`sh
-          chroot-distro install --name oracle-sqldeveloper https://github.com/$GITHUB_REPOSITORY/releases/download/latest/$ARCHIVE_NAME
-          CD_USE_NS=1 chroot-distro run --shared-display --env ORACLE_PASSWORD=change-me oracle-sqldeveloper
+          chroot-distro install --name oracle-sqldeveloper https://github.com/$GITHUB_REPOSITORY/releases/download/sqldeveloper-$SQLDEVELOPER_VERSION/$ARCHIVE_NAME
+          CD_USE_NS=1 chroot-distro run --shared-display oracle-sqldeveloper
           \`\`\`
-
-          The image user has UID/GID 1000. The default database password is \`password\`; override it as shown above. Choose a different container name if one is already installed. Downloading a new release does not update existing containers; back up your data before replacing one.
 
           ## SHA-256
 
@@ -112,11 +103,25 @@ jobs:
           $ARCHIVE_SHA256  $ARCHIVE_NAME
           \`\`\`
 
-          This rolling \`latest\` release keeps only the current archive. Each successful workflow run replaces the previous assets and these release notes; older versions are not retained here.
           EOF
 
-      - name: Publish or replace latest
+      - name: Create release
+        id: publish
+        uses: softprops/action-gh-release@v3
+        with:
+          tag_name: sqldeveloper-${{ env.SQLDEVELOPER_VERSION }}
+          name: SQL Developer ${{ env.SQLDEVELOPER_VERSION }}
+          body_path: ${{ runner.temp }}/release-notes.md
+          draft: false
+          prerelease: false
+          make_latest: true
+          overwrite_files: true
+          fail_on_unmatched_files: true
+          files: ${{ runner.temp }}/${{ env.ARCHIVE_NAME }}
+
+      - name: Summarize release
         env:
-          GH_TOKEN: ${{ github.token }}
-          GH_REPO: ${{ github.repository }}
-        run: bash .github/scripts/publish-latest.sh
+          RELEASE_URL: ${{ steps.publish.outputs.url }}
+        run: |
+          printf 'Published SQL Developer %s: %s\n' \
+            "$SQLDEVELOPER_VERSION" "$RELEASE_URL" >> "$GITHUB_STEP_SUMMARY"

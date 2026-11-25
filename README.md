@@ -11,7 +11,7 @@ Run Oracle Database Free and the SQL Developer desktop app together with
 
 ## Install the latest prebuilt image
 
-Download the archive from the [latest release](https://github.com/sabamdarif/oracle-sqldeveloper-docker/releases/tag/latest),
+Download the archive from the [latest release](https://github.com/sabamdarif/oracle-sqldeveloper-docker/releases/latest),
 then install it without building locally:
 
 ```sh
@@ -23,6 +23,9 @@ CD_USE_NS=1 chroot-distro run --shared-display --env ORACLE_PASSWORD=change-me o
   Override the password as shown above.
 - Installing a new release does not update an existing container. Use a new name
   or back up your database before removing the old container.
+
+The stable [latest archive URL](https://github.com/sabamdarif/oracle-sqldeveloper-docker/releases/latest/download/oracle-sqldeveloper-x86_64.tar.xz)
+always points to the archive in the release marked as latest.
 
 ## Build and install
 
