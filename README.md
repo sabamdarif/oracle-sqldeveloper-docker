@@ -86,6 +86,45 @@ listener this container left behind on an earlier run is cleared automatically.
 
 ## Connecting
 
+### Automatic discovery (recommended)
+
+The image includes a client `tnsnames.ora` file with two aliases:
+
+| Alias      | Host / port      | Service     |
+| ---------- | ---------------- | ----------- |
+| `FREEPDB1` | `localhost:1521` | `FREEPDB1` |
+| `FREE`     | `localhost:1521` | `FREE`     |
+
+SQL Developer discovers these through
+`TNS_ADMIN=/opt/sqldeveloper/network/admin`. On the welcome page, look under
+**Databases Detected** and click the `FREEPDB1` entry to add a connection.
+Alternatively, open **New / Select Database Connection**, select
+**Connection Type: TNS**, and choose **Network Alias: FREEPDB1**. You do not need
+to type the hostname, port or service name.
+
+Enter username `system`, your configured `ORACLE_PASSWORD`, and leave the role
+as `default`. Click **Test**, then save/connect. You can select **Save Password**
+if you want SQL Developer to remember the credentials. The TNS file contains
+only connection addresses, not usernames or passwords.
+
+These aliases are included in newly built images; rebuilding does not modify an
+already installed container. Do not remove an existing container just to add
+them. To use them without rebuilding, copy this repository's `tnsnames.ora`
+into an accessible directory **inside the container**, then set that directory
+under **Tools → Preferences → Database → Advanced → Tnsnames Directory** and
+restart SQL Developer. For example, use `/home/sqldev/tns-admin/tnsnames.ora`
+and select `/home/sqldev/tns-admin` as the directory.
+
+If **No TNS entries found** still appears in a new image, check for a previously
+saved **Tnsnames Directory** preference pointing elsewhere. Set it to
+`/opt/sqldeveloper/network/admin` and restart SQL Developer. An existing
+`/home/sqldev/.tnsnames.ora` can also take precedence over `TNS_ADMIN`.
+
+The client aliases use an explicit `HOST = localhost`. Oracle's own listener
+and database network configuration are left unchanged.
+
+### Manual Basic connection
+
 In SQL Developer's **New / Select Database Connection** dialog:
 
 1. Choose **Connection Type: Basic**.
@@ -123,5 +162,6 @@ service name directly.
 ./test-entrypoint.sh
 ```
 
-These stub-based tests cover startup ordering, password resets, listener handling
-and the XE-data guard. They do not build the image or start a real Oracle database.
+These tests check the client TNS aliases and image discovery settings, plus
+stub-based startup ordering, password resets, listener handling and the XE-data
+guard. They do not build the image or start a real Oracle database or GUI.

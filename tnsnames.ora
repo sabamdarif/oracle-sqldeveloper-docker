@@ -1,0 +1,19 @@
+# SQL Developer client aliases. Use an explicit client hostname rather than the
+# empty HOST= value in upstream's database network configuration.
+FREEPDB1 =
+  (DESCRIPTION =
+    (ADDRESS = (PROTOCOL = TCP)(HOST = localhost)(PORT = 1521))
+    (CONNECT_DATA =
+      (SERVER = DEDICATED)
+      (SERVICE_NAME = FREEPDB1)
+    )
+  )
+
+FREE =
+  (DESCRIPTION =
+    (ADDRESS = (PROTOCOL = TCP)(HOST = localhost)(PORT = 1521))
+    (CONNECT_DATA =
+      (SERVER = DEDICATED)
+      (SERVICE_NAME = FREE)
+    )
+  )

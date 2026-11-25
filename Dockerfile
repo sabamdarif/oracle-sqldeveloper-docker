@@ -87,10 +87,14 @@ RUN LAUNCHER=/opt/sqldeveloper/ide/bin/launcher.sh \
     fi
 
 COPY --chmod=755 docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
+# Give the GUI its own client aliases. Do not change the database network files
+# that upstream manages under ORACLE_HOME and moves into oradata on first start.
+COPY --chmod=644 tnsnames.ora /opt/sqldeveloper/network/admin/tnsnames.ora
 RUN chown -R sqldev:sqldev /home/sqldev \
     && chmod -R a+rX /opt/sqldeveloper
 
 ENV HOME=/home/sqldev
+ENV TNS_ADMIN=/opt/sqldeveloper/network/admin
 ENV JAVA_HOME=/opt/java
 ENV PATH="/opt/java/bin:${PATH}"
 ENV LD_LIBRARY_PATH="/opt/java/lib:/opt/java/lib/server"

@@ -94,6 +94,38 @@ fail() {
     exit 1
 }
 
+# Client aliases must use real Free services and explicit JDBC hostnames. Also
+# check that the Dockerfile exposes the same readable file through TNS_ADMIN.
+if ! grep -qx 'FREEPDB1 =' "${here}/tnsnames.ora" ||
+    ! grep -Fq '(SERVICE_NAME = FREEPDB1)' "${here}/tnsnames.ora"; then
+    fail "the client TNS file must define the FREEPDB1 service alias"
+fi
+if ! grep -qx 'FREE =' "${here}/tnsnames.ora" ||
+    ! grep -Fq '(SERVICE_NAME = FREE)' "${here}/tnsnames.ora"; then
+    fail "the client TNS file must define the FREE CDB service alias"
+fi
+[ "$(grep -Fc '(HOST = localhost)(PORT = 1521)' "${here}/tnsnames.ora")" = 2 ] ||
+    fail "both client aliases must connect to localhost:1521"
+if grep -Eq '\(SID[[:space:]]*=' "${here}/tnsnames.ora"; then
+    fail "the client aliases must use service names, not SIDs"
+fi
+awk '
+    {
+        sub(/#.*/, "")
+        for (i = 1; i <= length($0); i++) {
+            c = substr($0, i, 1)
+            if (c == "(") depth++
+            if (c == ")" && --depth < 0) exit 1
+        }
+    }
+    END { if (depth != 0) exit 1 }
+' "${here}/tnsnames.ora" ||
+    fail "the client TNS descriptors must have balanced parentheses"
+grep -Fxq 'COPY --chmod=644 tnsnames.ora /opt/sqldeveloper/network/admin/tnsnames.ora' "${here}/Dockerfile" ||
+    fail "the image must install a readable client TNS file"
+grep -Fxq 'ENV TNS_ADMIN=/opt/sqldeveloper/network/admin' "${here}/Dockerfile" ||
+    fail "SQL Developer must discover the installed client TNS directory"
+
 fresh=$(run 0)
 [ "$(steps "${fresh}")" = "db gui " ] ||
     fail "a fresh database must start, then hand the container to SQL Developer"
