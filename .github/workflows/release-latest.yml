@@ -1,0 +1,127 @@
+name: Build and release latest
+run-name: SQL Developer ${{ inputs.sqldeveloper_version }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      sqldeveloper_version:
+        description: "Full Oracle download version (for example: 26.2.0.186.2220)"
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+defaults:
+  run:
+    shell: bash
+
+# Never cancel a run while it is replacing release assets.
+concurrency:
+  group: release-latest
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 180
+    env:
+      SQLDEVELOPER_VERSION: ${{ inputs.sqldeveloper_version }}
+      BASE_IMAGE: gvenzl/oracle-free:23-slim-faststart
+      ARCHIVE_NAME: oracle-sqldeveloper-x86_64.tar.xz
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate inputs
+        run: |
+          if [[ ! "$SQLDEVELOPER_VERSION" =~ ^[0-9]+(\.[0-9]+){4}$ ]]; then
+            echo '::error::Enter the full five-part Oracle version, for example 26.2.0.186.2220.'
+            exit 1
+          fi
+          echo "SQLDEVELOPER_URL=https://download.oracle.com/otn_software/java/sqldeveloper/sqldeveloper-${SQLDEVELOPER_VERSION}-x64.zip" >> "$GITHUB_ENV"
+
+      - name: Install chroot-distro
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends python3-venv xz-utils
+          /usr/bin/python3 -m venv "$RUNNER_TEMP/chroot-distro"
+          "$RUNNER_TEMP/chroot-distro/bin/pip" install 'chroot-distro==3.3.0'
+
+      - name: Test scripts
+        run: |
+          bash test-entrypoint.sh
+          bash test-publish-latest.sh
+
+      - name: Build with chroot-distro
+        run: |
+          sudo "$RUNNER_TEMP/chroot-distro/bin/chroot-distro" build \
+            --progress plain \
+            --architecture x86_64 \
+            --build-arg "BASE_IMAGE=$BASE_IMAGE" \
+            --build-arg "SQLDEVELOPER_URL=$SQLDEVELOPER_URL" \
+            --build-arg HOST_UID=1000 \
+            --build-arg HOST_GID=1000 \
+            --build-arg ORACLE_PASSWORD=password \
+            --tag oracle-sqldeveloper:latest \
+            --install-as oracle-sqldeveloper \
+            .
+
+      - name: Archive the built container
+        run: |
+          # Backup includes the image manifest (USER, ENV, WORKDIR, ENTRYPOINT),
+          # unlike a plain rootfs export. Streaming avoids a second huge tar file.
+          archive="$RUNNER_TEMP/$ARCHIVE_NAME"
+          # Extreme preset, one continuous compression stream: favor size over speed.
+          sudo "$RUNNER_TEMP/chroot-distro/bin/chroot-distro" backup oracle-sqldeveloper --compress none \
+            | xz -T1 -9e > "$archive"
+          # GitHub Actions runs bash with pipefail, so backup failure stops here.
+          size=$(stat --format=%s "$archive")
+          if (( size == 0 || size >= 2147483648 )); then
+            echo "::error::Archive is $size bytes; GitHub release assets must be smaller than 2 GiB."
+            exit 1
+          fi
+          tar -tf "$archive" > "$RUNNER_TEMP/archive-members.txt"
+          grep -Fxq 'oracle-sqldeveloper/manifest.json' "$RUNNER_TEMP/archive-members.txt"
+          grep -Fxq 'oracle-sqldeveloper/rootfs/opt/sqldeveloper/sqldeveloper.sh' "$RUNNER_TEMP/archive-members.txt"
+          echo "ARCHIVE_SIZE=$size" >> "$GITHUB_ENV"
+          echo "ARCHIVE_SHA256=$(sha256sum "$archive" | cut -d ' ' -f 1)" >> "$GITHUB_ENV"
+
+      - name: Write replacement release notes
+        run: |
+          cat > "$RUNNER_TEMP/release-notes.md" <<EOF
+          # Oracle Database Free + SQL Developer
+
+          - **SQL Developer version:** $SQLDEVELOPER_VERSION
+          - **Oracle Database base image:** \`$BASE_IMAGE\`
+          - **Architecture:** Linux x86_64 (amd64)
+          - **Archive:** \`$ARCHIVE_NAME\` ($ARCHIVE_SIZE bytes)
+          - **Format:** chroot-distro backup, including image startup settings
+          - **Built from:** $GITHUB_SHA
+          - **Build:** https://github.com/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID
+          - **SQL Developer download:** $SQLDEVELOPER_URL
+
+          ## Install and run
+
+          Requires Linux x64, chroot-distro, a desktop display, and at least 2 GB of free memory for Oracle plus memory for SQL Developer.
+
+          \`\`\`sh
+          chroot-distro install --name oracle-sqldeveloper https://github.com/$GITHUB_REPOSITORY/releases/download/latest/$ARCHIVE_NAME
+          CD_USE_NS=1 chroot-distro run --shared-display --env ORACLE_PASSWORD=change-me oracle-sqldeveloper
+          \`\`\`
+
+          The image user has UID/GID 1000. The default database password is \`password\`; override it as shown above. Choose a different container name if one is already installed. Downloading a new release does not update existing containers; back up your data before replacing one.
+
+          ## SHA-256
+
+          \`\`\`text
+          $ARCHIVE_SHA256  $ARCHIVE_NAME
+          \`\`\`
+
+          This rolling \`latest\` release keeps only the current archive. Each successful workflow run replaces the previous assets and these release notes; older versions are not retained here.
+          EOF
+
+      - name: Publish or replace latest
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: bash .github/scripts/publish-latest.sh

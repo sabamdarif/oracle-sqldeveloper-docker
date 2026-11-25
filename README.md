@@ -9,6 +9,21 @@ Run Oracle Database Free and the SQL Developer desktop app together with
 - [chroot-distro](https://github.com/sabamdarif/chroot-distro) installed.
 - At least 2 GB of free memory for Oracle, plus memory for SQL Developer.
 
+## Install the latest prebuilt image
+
+Download the archive from the [latest release](https://github.com/sabamdarif/oracle-sqldeveloper-docker/releases/tag/latest),
+then install it without building locally:
+
+```sh
+chroot-distro install --name oracle-sqldeveloper ./oracle-sqldeveloper-x86_64.tar.xz
+CD_USE_NS=1 chroot-distro run --shared-display --env ORACLE_PASSWORD=change-me oracle-sqldeveloper
+```
+
+- The prebuilt image uses UID/GID `1000` and the default password `password`.
+  Override the password as shown above.
+- Installing a new release does not update an existing container. Use a new name
+  or back up your database before removing the old container.
+
 ## Build and install
 
 Run from this repository's directory. Replace `password` with your own password.
