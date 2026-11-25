@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Start Oracle XE, then hand the container over to SQL Developer. Whoever enters
+# Start Oracle Free, then hand the container over to SQL Developer. Whoever enters
 # -- `sqldev` from the image USER, or root with `--user root` -- the database has
 # to be started by `oracle`, which is what the image's sudoers rule is for.
 set -euo pipefail
@@ -7,8 +7,19 @@ set -euo pipefail
 : "${ORACLE_PASSWORD:?is empty; the image config bakes a password in, so this was overridden with nothing}"
 
 ORACLE_BASE="${ORACLE_BASE:-/opt/oracle}"
-ORACLE_SID="${ORACLE_SID:-XE}"
+ORACLE_SID="${ORACLE_SID:-FREE}"
 DBCONFIG="${ORACLE_BASE}/oradata/dbconfig/${ORACLE_SID}"
+
+# A base-image change cannot upgrade XE data files. Refuse before touching the
+# listener or data, so an old oradata mount is not initialized as a Free database.
+if [ -d "${ORACLE_BASE}/oradata/dbconfig/XE" ]; then
+    cat >&2 <<'EOF'
+CONTAINER: Oracle XE data detected; it cannot be reused by this Oracle Free image.
+Back up/export your XE schemas (for example with Oracle Data Pump), start Oracle
+Free with a fresh data directory, then import them. The XE data was not changed.
+EOF
+    exit 1
+fi
 
 # `sudo -i` gives oracle its own login environment and drops ours, which matters
 # here: the JDK paths this image exports would otherwise shadow Oracle's own
@@ -21,7 +32,10 @@ as_oracle() { sudo -iu oracle "$@"; }
 # report a bare "DATABASE STARTUP FAILED". Clearing it is safe only when this session
 # has no database of its own to lose, which is what healthcheck.sh answers, and a
 # listener that is not this container's refuses the request instead of stopping.
-if ! as_oracle healthcheck.sh "${ORACLE_SID}" >/dev/null 2>&1; then
+# Ignore container-readiness markers here: an interrupted initialization can
+# leave them behind even when the database itself is open. The image HEALTHCHECK
+# still checks those markers normally.
+if ! as_oracle healthcheck.sh "${ORACLE_SID}" "container status ignore" >/dev/null 2>&1; then
     if ! stop_output=$(as_oracle lsnrctl stop 2>&1); then
         # TNS-01189 is a listener refusing our request: it answered on the TCP
         # endpoint and is not this container's, so it cannot be cleared from here.
@@ -77,7 +91,7 @@ cat <<EOF
 Connect from SQL Developer with:
   Hostname  localhost
   Port      1521
-  Service   ${ORACLE_DATABASE:-XEPDB1}   (or ${ORACLE_SID} for the CDB)
+  Service   ${ORACLE_DATABASE:-FREEPDB1}   (or ${ORACLE_SID} for the CDB)
   Username  system
   Password  ${ORACLE_PASSWORD}
 #####################################################

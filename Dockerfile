@@ -1,10 +1,9 @@
-# Oracle XE 21c + SQL Developer in one image. See README.md for build and run.
+# Oracle Database Free + SQL Developer in one image. See README.md for build and run.
 #
-# The base image is the published build of oci-oracle-xe/ (21.3.0, the newest
-# version that setup supports) in its `slim-faststart` flavor: the database is
-# created at build time, so this starts in seconds rather than running
-# `oracle-xe-21c configure` for 20 minutes. Needs >=2 GB of memory.
-ARG BASE_IMAGE="gvenzl/oracle-xe:21-slim-faststart"
+# Use the published Oracle Free image in its `slim-faststart` flavor: upstream
+# creates and expands the database at build time, leaving only configuration
+# and startup for the first run. Needs >=2 GB of memory for the database alone.
+ARG BASE_IMAGE="gvenzl/oracle-free:23-slim-faststart"
 FROM ${BASE_IMAGE}
 
 ARG HOST_UID=1000

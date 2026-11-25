@@ -1,9 +1,15 @@
-# Oracle XE + SQL Developer in one image
+# Oracle Database Free + SQL Developer in one image
 
-The base image is [gvenzl/oracle-xe](https://github.com/gvenzl/oci-oracle-xe) `21-slim-faststart`,
-which creates the database at build time: a start takes seconds instead of the twenty minutes
-`oracle-xe-21c configure` needs. `oci-oracle-xe/` is a checkout of that project,
-kept as a reference for its entrypoint — nothing builds from it.
+The base image is [gvenzl/oracle-free](https://github.com/gvenzl/oci-oracle-free)
+`23-slim-faststart`. Upstream creates and expands the database at build time, so
+the first run only configures and starts it; it does not run the full Oracle
+installer. This project extends the published image, not an upstream checkout.
+
+The `23` tag follows upstream's current release (currently Oracle AI Database
+26ai Free, version `23.26.4`). Pin a version or digest with `BASE_IMAGE` if you
+need reproducible builds. The default slim flavor omits components such as
+Oracle Text, Spatial and the in-database JVM; choose a regular or full Oracle
+Free image if you need them.
 
 ## Requirements
 
@@ -13,7 +19,13 @@ kept as a reference for its entrypoint — nothing builds from it.
 sudo pip install chroot-distro
 ```
 
-- 2 GB of free memory, ~7 GB of disk,
+- At least 2 GB of free memory for Oracle alone, plus memory for SQL Developer;
+  allow additional disk space for the Free database, GUI, downloads and build cache.
+- The default SQL Developer download is an x64 archive. The Oracle Free base
+  supports native AMD64 and ARM64 starting with version 23.5, but the complete
+  GUI image has not been validated on ARM64. An ARM build needs a compatible
+  SQL Developer archive and native JDK/JavaFX libraries; changing the base image
+  alone does not guarantee ARM GUI support.
 
 ## Build
 
@@ -32,10 +44,32 @@ chroot-distro build \
 - **`HOST_UID`, `HOST_GID`** — the GUI runs as this uid, so make it yours or the
   X11 socket and any bind mounts will not be usable. Both default to 1000.
 - **`SQLDEVELOPER_URL`** — a newer release from Oracle's [download page](https://www.oracle.com/database/sqldeveloper/technologies/download/).
-- **`BASE_IMAGE`** — to pin the base image to a digest.
+- **`BASE_IMAGE`** — an Oracle Free image reference, to select a different flavor
+  or pin a version/digest. Defaults to `gvenzl/oracle-free:23-slim-faststart`;
+  `ghcr.io/gvenzl/oracle-free:23-slim-faststart` is the alternative registry.
 
-`--install-as` will not overwrite an existing container, so a rebuild starts with
-`chroot-distro remove oracle-sqldeveloper`.
+`--install-as` will not overwrite an existing container. Back up/export any data
+you need before removing it with `chroot-distro remove oracle-sqldeveloper`.
+For an XE-to-Free migration, keep the old container and install under a different
+name instead (see below).
+
+## Migrating from Oracle XE
+
+Changing the base image does **not** upgrade an existing XE database. Do not
+reuse its `/opt/oracle/oradata` directory with Oracle Free. The entrypoint refuses
+to start if it detects the old `dbconfig/XE` directory, without changing that data.
+
+1. Export the schemas/data you need from XE, for example with Oracle Data Pump.
+   Keep the old container and a backup until the migration is verified.
+2. Build/install the Free image under a separate name, such as
+   `--install-as oracle-free-sqldeveloper`, using a fresh data directory.
+3. Stop the XE database so port 1521 is free, then run the new container:
+   `chroot-distro run --shared-display oracle-free-sqldeveloper`.
+4. Import your schemas into `FREEPDB1` and update saved SQL Developer connections
+   from service `XEPDB1` to `FREEPDB1`.
+
+Pinning or changing Oracle Free versions also does not provide an automatic
+database upgrade; follow Oracle's supported migration/upgrade procedure.
 
 ## Run
 
@@ -52,12 +86,42 @@ listener this container left behind on an earlier run is cleared automatically.
 
 ## Connecting
 
-The entrypoint prints these just before the GUI appears:
+In SQL Developer's **New / Select Database Connection** dialog:
 
-|          |                                           |
-| -------- | ----------------------------------------- |
-| Hostname | `localhost`                               |
-| Port     | `1521`                                    |
-| Service  | `XEPDB1`, or `XE` for the CDB             |
-| Username | `system`                                  |
-| Password | whatever `ORACLE_PASSWORD` was built with |
+1. Choose **Connection Type: Basic**.
+2. Select the **Service name** radio button below **SID**, and enter `FREEPDB1`.
+3. Use these settings:
+
+   | Setting      | Value                                     |
+   | ------------ | ----------------------------------------- |
+   | Hostname     | `localhost`                               |
+   | Port         | `1521`                                    |
+   | Service name | `FREEPDB1`, or `FREE` for the CDB         |
+   | Username     | `system`                                  |
+   | Password     | whatever `ORACLE_PASSWORD` was built with |
+   | Role         | `default`                                 |
+
+4. Click **Test**, then **Connect** if successful. Save the corrected connection
+   settings for future use.
+
+The entrypoint also prints the connection details just before the GUI appears.
+
+### ORA-12505: SID xe is not registered with the listener
+
+This error means the connection is still using the old XE SID. Oracle Free uses
+`FREE` / `FREEPDB1`, not `XE` / `XEPDB1`. Select **Service name** (not **SID**),
+enter `FREEPDB1`, then test again. No image rebuild or database recreation is
+needed to correct this connection setting.
+
+The welcome page's **No TNS entries found** message does not prevent a **Basic**
+connection. TNS aliases are not required when entering the hostname, port and
+service name directly.
+
+## Tests
+
+```sh
+./test-entrypoint.sh
+```
+
+These stub-based tests cover startup ordering, password resets, listener handling
+and the XE-data guard. They do not build the image or start a real Oracle database.
