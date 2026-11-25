@@ -1,5 +1,4 @@
 #!/usr/bin/env bash
-# Only called after the build and archive validation succeed.
 set -euo pipefail
 
 : "${GH_REPO:?}" "${GITHUB_SHA:?}" "${SQLDEVELOPER_VERSION:?}" "${RUNNER_TEMP:?}" "${ARCHIVE_NAME:?}"
@@ -9,12 +8,9 @@ test -s "$archive"
 test -s "$notes"
 title="Latest — SQL Developer $SQLDEVELOPER_VERSION"
 
-# Listing distinguishes a missing release from API/authentication failures: any
-# failure stops the script instead of being mistaken for a first-time publish.
 release_id=$(gh api "repos/$GH_REPO/releases" --paginate \
     --jq '.[] | select(.tag_name == "latest") | .id')
 
-# Move only the rolling tag, not any branch or versioned tag.
 git tag --force latest "$GITHUB_SHA"
 git push --force origin refs/tags/latest
 
@@ -22,8 +18,6 @@ if [[ -z "$release_id" ]]; then
     gh release create latest "$archive" --verify-tag \
         --title "$title" --notes-file "$notes" --latest
 else
-    # --clobber replaces same-name assets. Keep differently named old archives
-    # until the new upload succeeds.
     gh release upload latest "$archive" --clobber
     old_assets=$(gh api "repos/$GH_REPO/releases/$release_id/assets" --paginate \
         --jq ".[] | select(.name != \"$ARCHIVE_NAME\") | .id")

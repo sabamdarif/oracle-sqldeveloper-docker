@@ -16,7 +16,6 @@ defaults:
   run:
     shell: bash
 
-# Never cancel a run while it is replacing release assets.
 concurrency:
   group: release-latest
   cancel-in-progress: false
@@ -68,13 +67,9 @@ jobs:
 
       - name: Archive the built container
         run: |
-          # Backup includes the image manifest (USER, ENV, WORKDIR, ENTRYPOINT),
-          # unlike a plain rootfs export. Streaming avoids a second huge tar file.
           archive="$RUNNER_TEMP/$ARCHIVE_NAME"
-          # Extreme preset, one continuous compression stream: favor size over speed.
-          sudo "$RUNNER_TEMP/chroot-distro/bin/chroot-distro" backup oracle-sqldeveloper --compress none \
-            | xz -T1 -9e > "$archive"
-          # GitHub Actions runs bash with pipefail, so backup failure stops here.
+          sudo "$RUNNER_TEMP/chroot-distro/bin/chroot-distro" backup oracle-sqldeveloper \
+            --output "$archive"
           size=$(stat --format=%s "$archive")
           if (( size == 0 || size >= 2147483648 )); then
             echo "::error::Archive is $size bytes; GitHub release assets must be smaller than 2 GiB."

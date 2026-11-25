@@ -21,11 +21,11 @@ import oracle.dbtools.core.secrets.TextSecret;
 import org.w3c.dom.Document;
 import org.w3c.dom.Element;
 
-/** Seed an unused SQL Developer profile with its own encrypted SYSTEM connection. */
 public class SeedSqlDeveloperConnection {
     static final String NAME = "Oracle Free (SYSTEM)";
     static final String HASH_NS = "http://xmlns.oracle.com/ide/hash";
 
+    // Exception messages from credential APIs must not enter startup logs.
     public static void main(String[] args) {
         try {
             String home = System.getenv("IDE_USER_DIR");
@@ -35,12 +35,12 @@ public class SeedSqlDeveloperConnection {
             seed(Path.of(args[0]), Path.of(home), System.getenv("ORACLE_PASSWORD"),
                     System.getenv().getOrDefault("ORACLE_DATABASE", "FREEPDB1"));
         } catch (Exception e) {
-            // Exception messages from credential APIs must not enter startup logs.
             System.err.println("CONTAINER: could not create the automatic SQL Developer connection; use TNS or Basic settings instead.");
             System.exit(1);
         }
     }
 
+    // Hard links publish files without overwriting files created by a concurrent startup.
     static boolean seed(Path installation, Path userDirectory, String password, String service) throws Exception {
         Properties version = new Properties();
         try (InputStream in = Files.newInputStream(installation.resolve("sqldeveloper/bin/version.properties"))) {
@@ -109,7 +109,6 @@ public class SeedSqlDeveloperConnection {
             doc.getDocumentElement().appendChild(value);
         }
 
-        // Use the same credential worker and JSON serializer as the installed GUI.
         try (TextSecret keySecret = Secrets.instance().of(key.toCharArray(), true);
                 TextSecret passwordSecret = Secrets.instance().of(password.toCharArray(), true)) {
             ReferenceWorker<char[]> worker = ReferenceWorker.createDefaultWorker(keySecret);
@@ -142,7 +141,6 @@ public class SeedSqlDeveloperConnection {
                     transformerFactory.setAttribute(XMLConstants.ACCESS_EXTERNAL_DTD, "");
                     transformerFactory.setAttribute(XMLConstants.ACCESS_EXTERNAL_STYLESHEET, "");
                     transformerFactory.newTransformer().transform(new DOMSource(doc), new StreamResult(temp.toFile()));
-                    // Publish without replacing a file another startup just created.
                     Files.createLink(preferences, temp);
                 } finally {
                     Files.deleteIfExists(temp);
