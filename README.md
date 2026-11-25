@@ -64,7 +64,7 @@ to start if it detects the old `dbconfig/XE` directory, without changing that da
 2. Build/install the Free image under a separate name, such as
    `--install-as oracle-free-sqldeveloper`, using a fresh data directory.
 3. Stop the XE database so port 1521 is free, then run the new container:
-   `chroot-distro run --shared-display oracle-free-sqldeveloper`.
+   `CD_USE_NS=1 chroot-distro run --shared-display oracle-free-sqldeveloper`.
 4. Import your schemas into `FREEPDB1` and update saved SQL Developer connections
    from service `XEPDB1` to `FREEPDB1`.
 
@@ -74,11 +74,15 @@ database upgrade; follow Oracle's supported migration/upgrade procedure.
 ## Run
 
 ```sh
-chroot-distro run --shared-display oracle-sqldeveloper
+CD_USE_NS=1 chroot-distro run --shared-display oracle-sqldeveloper
 ```
 
 `--shared-display` wires up X11/Wayland, audio and D-Bus. Quitting SQL Developer
 ends the run. Arguments after `--` are passed on to SQL Developer.
+
+`CD_USE_NS=1` gives Oracle separate IPC resources. Without it, a previous run can
+leave shared memory/semaphores on the host, causing the initial SQL*Plus health
+check to hang silently. Namespaces avoid attaching to those leftovers.
 
 Only one Oracle can own port 1521 and the guest shares the host's network, so stop a
 Docker or host database first; the entrypoint says so instead of failing halfway. A
@@ -86,12 +90,57 @@ listener this container left behind on an earlier run is cleared automatically.
 
 ## Connecting
 
-### Automatic discovery (recommended)
+### Saved connection with automatic credentials (recommended)
+
+On the first launch with a fresh SQL Developer profile, the entrypoint creates
+**Oracle Free (SYSTEM)** in the **Connections** panel. Double-click it to connect:
+the hostname, port, service, username and password are already saved.
+
+| Setting  | Automatic value                                  |
+| -------- | ------------------------------------------------ |
+| Host     | `localhost:1521`                                 |
+| Service  | `FREEPDB1` (or the configured `ORACLE_DATABASE`) |
+| Username | `system`                                         |
+| Password | The configured `ORACLE_PASSWORD`                 |
+| Role     | `default`                                        |
+
+The setup runs after successful database startup/password reset and uses SQL
+Developer's own credential-encryption and connection-storage APIs. Each fresh
+profile receives its own random encryption key; connection and key files are
+created with owner-only permissions. The connection uses JDBC Thin, so it does
+not need an OCI client configuration.
+
+Existing connection stores, older profiles awaiting settings migration, and
+existing preferences without a credential key are left untouched. The setup
+does not replace, merge or update your saved connections. If you later change
+`ORACLE_PASSWORD`, update the saved password in SQL Developer once. An existing
+profile can still use the TNS aliases below.
+
+To disable automatic saved credentials:
+
+```sh
+CD_USE_NS=1 chroot-distro run --shared-display \
+    --env SQLDEVELOPER_AUTO_CONNECTION=false oracle-sqldeveloper
+```
+
+This uses the same local protection as SQL Developer's **Save Password** option,
+not a separate secret vault: someone who can read the profile and its key can
+recover the password. `ORACLE_PASSWORD` is also already present in this image's
+configuration. The setup writes no plaintext password to connection files.
+The entrypoint prints the password in its connection banner for manual setup,
+so anyone who can read the terminal output or startup logs can see it.
+
+This feature is included in newly built images and tested against SQL Developer
+26.2's bundled libraries. Rebuilding does not change an already installed
+container or its saved profile. If setup fails, the GUI still starts and you can
+use a TNS or Basic connection.
+
+### TNS discovery (no saved credentials)
 
 The image includes a client `tnsnames.ora` file with two aliases:
 
-| Alias      | Host / port      | Service     |
-| ---------- | ---------------- | ----------- |
+| Alias      | Host / port      | Service    |
+| ---------- | ---------------- | ---------- |
 | `FREEPDB1` | `localhost:1521` | `FREEPDB1` |
 | `FREE`     | `localhost:1521` | `FREE`     |
 
@@ -160,8 +209,14 @@ service name directly.
 
 ```sh
 ./test-entrypoint.sh
+
+# Credential setup tests need an unpacked SQL Developer installation and JDK 17+:
+SQLDEVELOPER_HOME=/path/to/sqldeveloper JAVA_HOME=/path/to/jdk \
+    ./test-connection-setup.sh
 ```
 
-These tests check the client TNS aliases and image discovery settings, plus
-stub-based startup ordering, password resets, listener handling and the XE-data
-guard. They do not build the image or start a real Oracle database or GUI.
+The entrypoint tests check TNS settings, startup/setup ordering, password resets,
+listener handling and the XE-data guard with stubs. Credential tests use the
+installed SQL Developer libraries to save/reload and decrypt a connection, check
+file permissions, and verify that existing profiles stay unchanged. Neither
+suite builds the image or starts a real Oracle database or GUI.

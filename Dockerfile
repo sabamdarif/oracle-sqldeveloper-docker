@@ -87,6 +87,11 @@ RUN LAUNCHER=/opt/sqldeveloper/ide/bin/launcher.sh \
     fi
 
 COPY --chmod=755 docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
+COPY --chmod=755 setup-sqldeveloper-connection.sh /usr/local/bin/setup-sqldeveloper-connection
+COPY --chmod=644 SeedSqlDeveloperConnection.java /usr/local/lib/sqldeveloper-bootstrap/SeedSqlDeveloperConnection.java
+RUN /opt/java/bin/javac -cp '/opt/sqldeveloper/sqldeveloper/lib/*' \
+    -d /usr/local/lib/sqldeveloper-bootstrap \
+    /usr/local/lib/sqldeveloper-bootstrap/SeedSqlDeveloperConnection.java
 # Give the GUI its own client aliases. Do not change the database network files
 # that upstream manages under ORACLE_HOME and moves into oradata on first start.
 COPY --chmod=644 tnsnames.ora /opt/sqldeveloper/network/admin/tnsnames.ora
@@ -95,6 +100,7 @@ RUN chown -R sqldev:sqldev /home/sqldev \
 
 ENV HOME=/home/sqldev
 ENV TNS_ADMIN=/opt/sqldeveloper/network/admin
+ENV SQLDEVELOPER_AUTO_CONNECTION=true
 ENV JAVA_HOME=/opt/java
 ENV PATH="/opt/java/bin:${PATH}"
 ENV LD_LIBRARY_PATH="/opt/java/lib:/opt/java/lib/server"

@@ -53,11 +53,17 @@ esac
 exit 90
 STUB
     printf '#!/bin/sh\necho gui\n' >"${stub}/sqldeveloper.sh"
-    chmod +x "${stub}/sudo" "${stub}/sqldeveloper.sh"
+    cat >"${stub}/setup-sqldeveloper-connection" <<'STUB'
+#!/bin/sh
+[ "${ORACLE_PASSWORD}" = "${STUB_PASSWORD}" ] || exit 90
+echo setup
+exit "${STUB_SETUP_STATUS:-0}"
+STUB
+    chmod +x "${stub}/sudo" "${stub}/sqldeveloper.sh" "${stub}/setup-sqldeveloper-connection"
 
     case "$existing" in
-        existing) mkdir -p "${stub}/oracle/oradata/dbconfig/${sid:-FREE}" ;;
-        xe) mkdir -p "${stub}/oracle/oradata/dbconfig/XE" ;;
+    existing) mkdir -p "${stub}/oracle/oradata/dbconfig/${sid:-FREE}" ;;
+    xe) mkdir -p "${stub}/oracle/oradata/dbconfig/XE" ;;
     esac
 
     (
@@ -71,6 +77,7 @@ STUB
             STUB_PASSWORD="${password}" \
             STUB_DB_STATUS="${status}" \
             STUB_RESET_STATUS="${STUB_RESET_STATUS:-0}" \
+            STUB_SETUP_STATUS="${STUB_SETUP_STATUS:-0}" \
             STUB_HEALTHY="${STUB_HEALTHY:-1}" \
             STUB_MARKERS="${STUB_MARKERS:-0}" \
             STUB_LSNRCTL_OUT="${STUB_LSNRCTL_OUT:-}" \
@@ -87,7 +94,7 @@ STUB
     rm -rf "${stub}"
 }
 # The steps the stubs reported, in order, so a test can assert on the sequence.
-steps() { printf '%s\n' "$1" | grep -Ex 'db|reset|gui' | tr '\n' ' '; }
+steps() { printf '%s\n' "$1" | grep -Ex 'db|reset|setup|gui' | tr '\n' ' '; }
 
 fail() {
     echo "FAIL: $1" >&2
@@ -127,7 +134,7 @@ grep -Fxq 'ENV TNS_ADMIN=/opt/sqldeveloper/network/admin' "${here}/Dockerfile" |
     fail "SQL Developer must discover the installed client TNS directory"
 
 fresh=$(run 0)
-[ "$(steps "${fresh}")" = "db gui " ] ||
+[ "$(steps "${fresh}")" = "db setup gui " ] ||
     fail "a fresh database must start, then hand the container to SQL Developer"
 grep -qx 'status=0' <<<"${fresh}" ||
     fail "a successful startup must exit successfully"
@@ -139,7 +146,7 @@ grep -Fxq 'call <-iu> <oracle> <healthcheck.sh> <FREE> <container status ignore>
 [ "$(steps "$(run 1)")" = "db " ] ||
     fail "SQL Developer must not launch when the database fails to start"
 
-[ "$(steps "$(run 0 existing)")" = "db reset gui " ] ||
+[ "$(steps "$(run 0 existing)")" = "db reset setup gui " ] ||
     fail "an existing database must have the configured password re-applied"
 
 reset_failed=$(STUB_RESET_STATUS=1 run 0 existing)
@@ -150,11 +157,13 @@ grep -qx 'status=1' <<<"${reset_failed}" ||
 
 # Quoting must preserve spaces and shell metacharacters across sudo/env.
 password=$(STUB_PASSWORD='secret with spaces $;*' run 0 existing)
-[ "$(steps "${password}")" = "db reset gui " ] ||
+[ "$(steps "${password}")" = "db reset setup gui " ] ||
     fail "the configured password must reach startup and resetPassword unchanged"
+grep -Fxq '  Password  secret with spaces $;*' <<<"${password}" ||
+    fail "the connection banner must print the configured password for manual connections"
 
 explicit=$(run 0 existing FREE)
-[ "$(steps "${explicit}")" = "db reset gui " ] ||
+[ "$(steps "${explicit}")" = "db reset setup gui " ] ||
     fail "an explicitly inherited FREE SID must find the existing configuration"
 
 xe=$(run 0 xe)
@@ -174,16 +183,16 @@ foreign=$(STUB_LSNRCTL_OUT='TNS-01189: The listener could not authenticate the u
 grep -qx 'status=1' <<<"${foreign}" ||
     fail "a listener on port 1521 that is not ours must fail, not skip silently"
 
-[ "$(steps "$(STUB_LSNRCTL_STATUS=0 run 0)")" = "db gui " ] ||
+[ "$(steps "$(STUB_LSNRCTL_STATUS=0 run 0)")" = "db setup gui " ] ||
     fail "a listener a previous run left behind must be stopped, then the database started"
 
 # TNS-01189 would abort the start if the listener were touched at all, so reaching
 # the GUI is what proves a reachable database was left alone.
-[ "$(steps "$(STUB_HEALTHY=0 STUB_LSNRCTL_OUT='TNS-01189: no' run 0)")" = "db gui " ] ||
+[ "$(steps "$(STUB_HEALTHY=0 STUB_LSNRCTL_OUT='TNS-01189: no' run 0)")" = "db setup gui " ] ||
     fail "a database that is already reachable must keep the listener it is registered with"
 
 markers=$(STUB_MARKERS=1 STUB_HEALTHY=0 STUB_LSNRCTL_OUT='TNS-01189: no' run 0)
-[ "$(steps "${markers}")" = "db gui " ] ||
+[ "$(steps "${markers}")" = "db setup gui " ] ||
     fail "stale readiness markers must not make us stop a reachable database's listener"
 
 empty=$(STUB_PASSWORD='' run 0)
@@ -191,5 +200,14 @@ empty=$(STUB_PASSWORD='' run 0)
     fail "an empty configured password must stop startup before Oracle or the GUI"
 grep -qx 'status=1' <<<"${empty}" ||
     fail "an empty configured password must fail the startup"
+
+setup_failed=$(STUB_SETUP_STATUS=1 run 0)
+[ "$(steps "${setup_failed}")" = "db setup gui " ] ||
+    fail "connection setup failure must not block an otherwise usable GUI"
+grep -qx 'status=0' <<<"${setup_failed}" ||
+    fail "connection setup is optional and must not fail database startup"
+
+SQLDEVELOPER_AUTO_CONNECTION=false bash "${here}/setup-sqldeveloper-connection.sh" ||
+    fail "automatic saved credentials must support opting out without invoking Java"
 
 echo ok

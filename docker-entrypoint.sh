@@ -85,6 +85,10 @@ if [ "${database_existed}" = true ]; then
     as_oracle resetPassword "${ORACLE_PASSWORD}"
 fi
 
+if ! setup-sqldeveloper-connection; then
+    echo "CONTAINER: automatic connection setup failed; SQL Developer will still start." >&2
+fi
+
 cat <<EOF
 
 #####################################################
